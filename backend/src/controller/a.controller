@@ -1,0 +1,830 @@
+import * as anchor from '@coral-xyz/anchor';
+import * as borsh from '@coral-xyz/borsh';
+import { irysStorage, keypairIdentity, Metaplex } from '@metaplex-foundation/js';
+import { createAssociatedTokenAccountInstruction, getAccount } from '@solana/spl-token';
+import { Keypair, PublicKey, Transaction } from '@solana/web3.js';
+import { createHash } from 'crypto';
+import { Request, Response } from 'express';
+
+import {
+  AI_AGENT_ADDRESS,
+  ASSOCIATED_TOKEN_PROGRAM_ID,
+  GASLITE_DROP_ADDRESS,
+  getAiAgentPda,
+  getAssociatedTokenAddress,
+  getConnection,
+  getCreatorTokenPda,
+  getEntryPointPda,
+  getLiquidityPoolPda,
+  getProgram,
+  getSelfTokenVaultPda,
+  getSignaturePda,
+  getSupporterContractPda,
+  getSwapRouterPda,
+  PROGRAM_ID,
+  PROTOCOL_FEE_ADDRESS,
+  SystemProgram,
+  TOKEN_PROGRAM_ID,
+  userA,
+  userB,
+} from '../utils/anchorClient';
+
+const connection = getConnection();
+
+const metaplex = Metaplex.make(connection)
+  .use(keypairIdentity(userA))
+  .use(
+    irysStorage({
+      address: 'https://devnet.irys.xyz',
+      providerUrl: 'https://pit44.nodes.rpcpool.com',
+      timeout: 60000,
+    })
+  );
+
+// Borsh schema for VaultConfig
+const vaultConfigSchema = borsh.struct([
+  borsh.u8('drip_percentage'),
+  borsh.i64('drip_interval'),
+  borsh.i64('lock_time'),
+  borsh.u8('locked_percentage'),
+]);
+
+// Borsh schema for DistributorConfig
+const distributorConfigSchema = borsh.struct([
+  borsh.u64('daily_drip_amount'),
+  borsh.i64('drip_interval'),
+  borsh.u16('total_days'),
+]);
+
+const VAULT_CONFIG_SIZE = 18; // 1 (u8) + 8 (i64) + 8 (i64) + 1 (u8)
+const DISTRIBUTOR_CONFIG_SIZE = 18; // 8 (u64) + 8 (i64) + 2 (u16)
+
+export const initialize = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const program = getProgram();
+    const [entryPointPda] = await getEntryPointPda();
+
+    await program.methods
+      .initialize(PROTOCOL_FEE_ADDRESS)
+      .accounts({
+        entryPoint: entryPointPda,
+        gasliteDrop: GASLITE_DROP_ADDRESS,
+        authority: userA.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    res.status(200).json({ message: 'Protocol initialized successfully', entryPoint: entryPointPda.toString() });
+  } catch (err: any) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to initialize protocol', details: err.message });
+  }
+};
+
+export const initializeSwapRouter = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const program = getProgram();
+    const [swapRouterPda] = await getSwapRouterPda();
+
+    const tx = await program.methods
+      .initializeSwapRouter()
+      .accounts({
+        swapRouter: swapRouterPda,
+        authority: userA.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    console.log('Transaction signature:', tx);
+    res.status(200).json({ message: 'Swap router initialized successfully', swapRouter: swapRouterPda.toString() });
+  } catch (err: any) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to initialize swap router', details: err.message });
+  }
+};
+
+export const deployCreatorToken = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const {
+      handle,
+      name,
+      symbol,
+      totalSupply,
+      selfPercent,
+      marketPercent,
+      supporterPercent,
+      nftMetadataUri,
+      aiAgent,
+      initialTokenAmount,
+      initialSolAmount,
+    } = req.body;
+
+    if (
+      !handle ||
+      !name ||
+      !symbol ||
+      !totalSupply ||
+      !selfPercent ||
+      !marketPercent ||
+      !supporterPercent ||
+      !nftMetadataUri ||
+      !aiAgent ||
+      !initialTokenAmount ||
+      !initialSolAmount
+    ) {
+      res.status(400).json({ error: 'All fields are required' });
+      return;
+    }
+
+    if (selfPercent + marketPercent + supporterPercent !== 100) {
+      res.status(400).json({ error: 'Percentages must sum to 100' });
+      return;
+    }
+
+    const program = getProgram();
+    const provider = program.provider;
+    const connection = provider.connection;
+    const handleHash = createHash('sha256').update(handle).digest();
+    const tokenMint = Keypair.generate(); // New mint for each deployment
+    const [creatorTokenPda] = await getCreatorTokenPda(handleHash);
+    const [selfTokenVaultPda] = await getSelfTokenVaultPda(tokenMint.publicKey);
+    const [liquidityPoolPda] = await getLiquidityPoolPda(tokenMint.publicKey);
+    const [supporterContractPda] = await getSupporterContractPda(tokenMint.publicKey);
+    const [solVaultPda] = await getSolVaultPda(tokenMint.publicKey);
+    const [entryPointPda] = await getEntryPointPda();
+    const [nftPda] = await PublicKey.findProgramAddressSync(
+      [
+        Buffer.from('nft'),
+        new anchor.BN((await program.account.attenomicsEntryPoint.fetch(entryPointPda)).nextTokenId).toArrayLike(
+          Buffer,
+          'le',
+          8
+        ),
+      ],
+      PROGRAM_ID
+    );
+    const [aiAgentPda] = await getAiAgentPda(new PublicKey(aiAgent));
+
+    const config = {
+      totalSupply: new anchor.BN(totalSupply * 1_000_000_000),
+      selfPercent: Number(selfPercent),
+      marketPercent: Number(marketPercent),
+      supporterPercent: Number(supporterPercent),
+      handle: Array.from(handleHash),
+      aiAgent: new PublicKey(aiAgent),
+    };
+
+    const vaultConfig = {
+      drip_percentage: 10,
+      drip_interval: new anchor.BN(86400),
+      lock_time: new anchor.BN(31536000),
+      locked_percentage: 80,
+    };
+
+    if (vaultConfig.drip_percentage > 100 || vaultConfig.locked_percentage > 100) {
+      res.status(400).json({ error: 'Invalid vault config percentages' });
+      return;
+    }
+
+    const vaultConfigBuffer = Buffer.alloc(VAULT_CONFIG_SIZE);
+    vaultConfigSchema.encode(vaultConfig, vaultConfigBuffer);
+
+    const distributorConfig = {
+      daily_drip_amount: new anchor.BN(500 * 1_000_000_000),
+      drip_interval: new anchor.BN(86400),
+      total_days: 365,
+    };
+
+    if (
+      distributorConfig.daily_drip_amount.lte(new anchor.BN(0)) ||
+      distributorConfig.drip_interval.lte(new anchor.BN(0)) ||
+      distributorConfig.total_days <= 0
+    ) {
+      res.status(400).json({ error: 'Invalid distributor config' });
+      return;
+    }
+
+    const totalDistribution = distributorConfig.daily_drip_amount.mul(new anchor.BN(distributorConfig.total_days));
+    const supporterTokens = config.totalSupply.mul(new anchor.BN(config.supporterPercent)).div(new anchor.BN(100));
+    if (totalDistribution.gt(supporterTokens)) {
+      res.status(400).json({ error: 'Total distribution exceeds supporter allocation' });
+      return;
+    }
+
+    const distributorConfigBuffer = Buffer.alloc(DISTRIBUTOR_CONFIG_SIZE);
+    distributorConfigSchema.encode(distributorConfig, distributorConfigBuffer);
+
+    const creatorTokenAccount = await getAssociatedTokenAddress(userA.publicKey, tokenMint.publicKey);
+    const tokenVault = await getAssociatedTokenAddress(liquidityPoolPda, tokenMint.publicKey);
+
+    const tx = await program.methods
+      .deployCreatorToken(
+        config,
+        distributorConfigBuffer,
+        vaultConfigBuffer,
+        name,
+        symbol,
+        nftMetadataUri,
+        new anchor.BN(initialTokenAmount * 1_000_000_000),
+        new anchor.BN(initialSolAmount * 1_000_000_000)
+      )
+      .accounts({
+        entryPoint: entryPointPda,
+        creatorTokenAccount: creatorTokenPda,
+        nftAccount: nftPda,
+        aiAgentAccount: aiAgentPda,
+        selfTokenVault: selfTokenVaultPda,
+        liquidityPool: liquidityPoolPda,
+        supporterContract: supporterContractPda,
+        tokenMint: tokenMint.publicKey,
+        tokenVault,
+        solVault: solVaultPda,
+        creatorTokenAccount,
+        creator: userA.publicKey,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+        rent: anchor.web3.SYSVAR_RENT_PUBKEY,
+      })
+      .signers([tokenMint])
+      .rpc();
+
+    console.log('deployCreatorToken Transaction signature:', tx);
+
+    // Create associated token accounts for vault and supporter
+    const vaultTokenAccount = await getAssociatedTokenAddress(selfTokenVaultPda, tokenMint.publicKey);
+    const supporterTokenAccount = await getAssociatedTokenAddress(supporterContractPda, tokenMint.publicKey);
+
+    const transaction = new Transaction().add(
+      createAssociatedTokenAccountInstruction(
+        userA.publicKey,
+        vaultTokenAccount,
+        selfTokenVaultPda,
+        tokenMint.publicKey
+      ),
+      createAssociatedTokenAccountInstruction(
+        userA.publicKey,
+        supporterTokenAccount,
+        supporterContractPda,
+        tokenMint.publicKey
+      )
+    );
+
+    const createAtaTxSig = await provider.sendAndConfirm(transaction, [userA]);
+    console.log('Create ATA Transaction signature:', createAtaTxSig);
+
+    // Mint initial tokens
+    const mintInitialTokensTxSig = await program.methods
+      .mintInitialTokens()
+      .accounts({
+        creatorTokenAccount: creatorTokenPda,
+        liquidityPool: liquidityPoolPda,
+        tokenMint: tokenMint.publicKey,
+        vaultTokenAccount,
+        supporterTokenAccount,
+        selfTokenVault: selfTokenVaultPda,
+        supporterContract: supporterContractPda,
+        creator: userA.publicKey,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    console.log('mintInitialTokens Transaction signature:', mintInitialTokensTxSig);
+
+    res.status(200).json({
+      message: 'Creator token deployed successfully',
+      tokenMint: tokenMint.publicKey.toString(),
+      creatorTokenAccount: creatorTokenPda.toString(),
+      nftAccount: nftPda.toString(),
+      transactionSignature: tx,
+      mintInitialTokensTxSig,
+      metadata: { name, symbol, uri: nftMetadataUri },
+    });
+  } catch (err: any) {
+    console.error(err);
+    if (err.message.includes('AIAgentNotAllowed')) {
+      res.status(400).json({ error: 'AI agent not allowed. Register the agent using set-ai-agent.' });
+    } else if (err.message.includes('HandleAlreadyUsed')) {
+      res.status(400).json({ error: 'Handle already used. Choose a different handle.' });
+    } else if (err.message.includes('InsufficientFunds')) {
+      res.status(400).json({ error: 'Insufficient SOL or tokens in wallet.' });
+    } else {
+      res.status(500).json({ error: 'Failed to deploy token', details: err.message });
+    }
+  }
+};
+
+export const buyTokens = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { tokenMint, solAmount, minTokenAmount } = req.body;
+    if (!tokenMint || !solAmount || !minTokenAmount) {
+      res.status(400).json({ error: 'Token mint, SOL amount, and min token amount are required' });
+      return;
+    }
+
+    const program = getProgram();
+    const [liquidityPoolPda] = await getLiquidityPoolPda(new PublicKey(tokenMint));
+    const [solVaultPda] = await getSolVaultPda(new PublicKey(tokenMint));
+    const tokenVault = await getAssociatedTokenAddress(liquidityPoolPda, new PublicKey(tokenMint));
+    const buyerTokenAccount = await getAssociatedTokenAddress(userA.publicKey, new PublicKey(tokenMint));
+
+    const tx = await program.methods
+      .buy(new anchor.BN(solAmount * 1_000_000_000), new anchor.BN(minTokenAmount * 1_000_000_000))
+      .accounts({
+        liquidityPool: liquidityPoolPda,
+        tokenMint: new PublicKey(tokenMint),
+        tokenVault,
+        solVault: solVaultPda,
+        buyer: userA.publicKey,
+        buyerTokenAccount,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    console.log('BuyTokens Transaction signature:', tx);
+    res.status(200).json({ message: `Successfully bought tokens`, transactionSignature: tx });
+  } catch (err: any) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to buy tokens', details: err.message });
+  }
+};
+
+export const sellTokens = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { tokenMint, tokenAmount, minSolAmount } = req.body;
+    if (!tokenMint || !tokenAmount || !minSolAmount) {
+      res.status(400).json({ error: 'Token mint, token amount, and min SOL amount are required' });
+      return;
+    }
+
+    const program = getProgram();
+    const [liquidityPoolPda] = await getLiquidityPoolPda(new PublicKey(tokenMint));
+    const [solVaultPda] = await getSolVaultPda(new PublicKey(tokenMint));
+    const tokenVault = await getAssociatedTokenAddress(liquidityPoolPda, new PublicKey(tokenMint));
+    const sellerTokenAccount = await getAssociatedTokenAddress(userB.publicKey, new PublicKey(tokenMint));
+
+    let sellerTokenAccountInfo;
+    try {
+      sellerTokenAccountInfo = await getAccount(connection, sellerTokenAccount);
+    } catch (error) {
+      console.log('Seller ATA does not exist, creating...');
+      const transaction = new Transaction().add(
+        createAssociatedTokenAccountInstruction(
+          userB.publicKey,
+          sellerTokenAccount,
+          userB.publicKey,
+          new PublicKey(tokenMint)
+        )
+      );
+      const signature = await program.provider.sendAndConfirm(transaction, [userB]);
+      console.log('Created seller ATA, transaction signature:', signature);
+      sellerTokenAccountInfo = await getAccount(connection, sellerTokenAccount);
+    }
+
+    const tx = await program.methods
+      .sell(new anchor.BN(tokenAmount * 1_000_000_000), new anchor.BN(minSolAmount * 1_000_000_000))
+      .accounts({
+        liquidityPool: liquidityPoolPda,
+        tokenMint: new PublicKey(tokenMint),
+        tokenVault,
+        solVault: solVaultPda,
+        seller: userB.publicKey,
+        sellerTokenAccount,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([userB])
+      .rpc();
+
+    console.log('SellTokens Transaction signature:', tx);
+    res.status(200).json({ message: `Successfully sold ${tokenAmount} tokens`, transactionSignature: tx });
+  } catch (err: any) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to sell tokens', details: err.message });
+  }
+};
+
+export const swapTokens = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { sourceTokenMint, targetTokenMint, amountIn, minAmountOut } = req.body;
+    if (!sourceTokenMint || !targetTokenMint || !amountIn || !minAmountOut) {
+      res.status(400).json({ error: 'All fields are required' });
+      return;
+    }
+
+    const program = getProgram();
+    const [swapRouterPda] = await getSwapRouterPda();
+    const [sourceLiquidityPoolPda] = await getLiquidityPoolPda(new PublicKey(sourceTokenMint));
+    const [targetLiquidityPoolPda] = await getLiquidityPoolPda(new PublicKey(targetTokenMint));
+    const [sourceSolVaultPda] = await getSolVaultPda(new PublicKey(sourceTokenMint));
+    const [targetSolVaultPda] = await getSolVaultPda(new PublicKey(targetTokenMint));
+    const sourceTokenVault = await getAssociatedTokenAddress(sourceLiquidityPoolPda, new PublicKey(sourceTokenMint));
+    const targetTokenVault = await getAssociatedTokenAddress(targetLiquidityPoolPda, new PublicKey(targetTokenMint));
+    const userSourceTokenAccount = await getAssociatedTokenAddress(userA.publicKey, new PublicKey(sourceTokenMint));
+    const userTargetTokenAccount = await getAssociatedTokenAddress(userA.publicKey, new PublicKey(targetTokenMint));
+
+    const tx = await program.methods
+      .swapTokens(new anchor.BN(amountIn * 1_000_000_000), new anchor.BN(minAmountOut * 1_000_000_000))
+      .accounts({
+        swapRouter: swapRouterPda,
+        sourceTokenMint: new PublicKey(sourceTokenMint),
+        sourceLiquidityPool: sourceLiquidityPoolPda,
+        sourceTokenVault,
+        sourceSolVault: sourceSolVaultPda,
+        targetTokenMint: new PublicKey(targetTokenMint),
+        targetLiquidityPool: targetLiquidityPoolPda,
+        targetTokenVault,
+        targetSolVault: targetSolVaultPda,
+        user: userA.publicKey,
+        userSourceTokenAccount,
+        userTargetTokenAccount,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    console.log('SwapTokens Transaction signature:', tx);
+    res.status(200).json({ message: 'Tokens swapped successfully', transactionSignature: tx });
+  } catch (err: any) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to swap tokens', details: err.message });
+  }
+};
+
+export const provideLiquidity = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { tokenMint, tokenAmount, solAmount } = req.body;
+    if (!tokenMint || !tokenAmount || !solAmount) {
+      res.status(400).json({ error: 'Token mint, token amount, and SOL amount are required' });
+      return;
+    }
+
+    const program = getProgram();
+    const [liquidityPoolPda] = await getLiquidityPoolPda(new PublicKey(tokenMint));
+    const [solVaultPda] = await getSolVaultPda(new PublicKey(tokenMint));
+    const tokenVault = await getAssociatedTokenAddress(liquidityPoolPda, new PublicKey(tokenMint));
+    const providerTokenAccount = await getAssociatedTokenAddress(userA.publicKey, new PublicKey(tokenMint));
+
+    const tx = await program.methods
+      .provideLiquidity(new anchor.BN(tokenAmount * 1_000_000_000), new anchor.BN(solAmount * 1_000_000_000))
+      .accounts({
+        liquidityPool: liquidityPoolPda,
+        tokenMint: new PublicKey(tokenMint),
+        tokenVault,
+        solVault: solVaultPda,
+        provider: userA.publicKey,
+        providerTokenAccount,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    console.log('ProvideLiquidity Transaction signature:', tx);
+    res.status(200).json({ message: `Successfully provided ${tokenAmount} tokens and ${solAmount} SOL as liquidity`, transactionSignature: tx });
+  } catch (err: any) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to provide liquidity', details: err.message });
+  }
+};
+
+export const withdrawFees = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { tokenMint } = req.body;
+    if (!tokenMint) {
+      res.status(400).json({ error: 'Token mint is required' });
+      return;
+    }
+
+    const program = getProgram();
+    const [liquidityPoolPda] = await getLiquidityPoolPda(new PublicKey(tokenMint));
+    const [solVaultPda] = await getSolVaultPda(new PublicKey(tokenMint));
+
+    const tx = await program.methods
+      .withdrawFees()
+      .accounts({
+        liquidityPool: liquidityPoolPda,
+        tokenMint: new PublicKey(tokenMint),
+        solVault: solVaultPda,
+        caller: userA.publicKey,
+        feeAddress: PROTOCOL_FEE_ADDRESS,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    console.log('WithdrawFees Transaction signature:', tx);
+    res.status(200).json({ message: 'Fees withdrawn successfully', transactionSignature: tx });
+  } catch (err: any) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to withdraw fees', details: err.message });
+  }
+};
+
+export const setAiAgent = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { agent, allowed } = req.body;
+    if (!agent || allowed === undefined) {
+      res.status(400).json({ error: 'Agent and allowed status are required' });
+      return;
+    }
+
+    const program = getProgram();
+    const [entryPointPda] = await getEntryPointPda();
+    const [agentPda] = await getAiAgentPda(new PublicKey(agent));
+
+    const tx = await program.methods
+      .setAiAgent(new PublicKey(agent), allowed)
+      .accounts({
+        entryPoint: entryPointPda,
+        agentAccount: agentPda,
+        authority: userA.publicKey,
+        agent: new PublicKey(agent),
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    console.log('SetAiAgent Transaction signature:', tx);
+    res.status(200).json({ message: 'AI agent status updated successfully', transactionSignature: tx });
+  } catch (err: any) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to set AI agent', details: err.message });
+  }
+};
+
+export const dripTokens = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { tokenMint, distributionPool } = req.body;
+    if (!tokenMint || !distributionPool) {
+      res.status(400).json({ error: 'Token mint and distribution pool are required' });
+      return;
+    }
+
+    const program = getProgram();
+    const [supporterContractPda] = await getSupporterContractPda(new PublicKey(tokenMint));
+    const supporterTokenAccount = await getAssociatedTokenAddress(supporterContractPda, new PublicKey(tokenMint));
+    const [globalEntryPointPda] = await getEntryPointPda();
+
+    const tx = await program.methods
+      .dripTokens()
+      .accounts({
+        supporterContract: supporterContractPda,
+        supporterTokenAccount,
+        distributionPool: new PublicKey(distributionPool),
+        aiAgent: AI_AGENT_ADDRESS,
+        globalEntryPoint: globalEntryPointPda,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    console.log('DripTokens Transaction signature:', tx);
+    res.status(200).json({ message: 'Tokens dripped successfully', transactionSignature: tx });
+  } catch (err: any) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to drip tokens', details: err.message });
+  }
+};
+
+export const availableForWithdrawal = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { tokenMint } = req.body;
+    if (!tokenMint) {
+      res.status(400).json({ error: 'Token mint is required' });
+      return;
+    }
+
+    const program = getProgram();
+    const [selfTokenVaultPda] = await getSelfTokenVaultPda(new PublicKey(tokenMint));
+
+    const amount = await program.methods
+      .availableForWithdrawal()
+      .accounts({
+        selfTokenVault: selfTokenVaultPda,
+      })
+      .call();
+
+    console.log('Available for withdrawal:', amount.toString());
+    res.status(200).json({ message: 'Available tokens retrieved', amount: amount.toString() });
+  } catch (err: any) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to get available tokens', details: err.message });
+  }
+};
+
+export const getHandleHash = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { username } = req.body;
+    if (!username) {
+      res.status(400).json({ error: 'Username is required' });
+      return;
+    }
+
+    const program = getProgram();
+    const tx = await program.methods
+      .getHandleHash(username)
+      .accounts({
+        signer: userA.publicKey,
+      })
+      .rpc();
+
+    console.log('GetHandleHash Transaction signature:', tx);
+    const handleHash = createHash('sha256').update(username).digest();
+    res.status(200).json({ message: 'Handle hash retrieved', hash: Buffer.from(handleHash).toString('hex') });
+  } catch (err: any) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to get handle hash', details: err.message });
+  }
+};
+
+export const getTokensForSol = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { tokenMint, solAmount } = req.body;
+    if (!tokenMint || !solAmount) {
+      res.status(400).json({ error: 'Token mint and SOL amount are required' });
+      return;
+    }
+
+    const program = getProgram();
+    const [liquidityPoolPda] = await getLiquidityPoolPda(new PublicKey(tokenMint));
+    const [solVaultPda] = await getSolVaultPda(new PublicKey(tokenMint));
+    const tokenVault = await getAssociatedTokenAddress(liquidityPoolPda, new PublicKey(tokenMint));
+
+    const tokenAmount = await program.methods
+      .getTokensForSol(new anchor.BN(solAmount * 1_000_000_000))
+      .accounts({
+        liquidityPool: liquidityPoolPda,
+        tokenMint: new PublicKey(tokenMint),
+        tokenVault,
+        solVault: solVaultPda,
+      })
+      .call();
+
+    console.log('getTokensForSol Token amount:', tokenAmount.toString());
+    res.status(200).json({ message: 'Token amount retrieved', tokenAmount: tokenAmount.toString() });
+  } catch (err: any) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to get tokens for SOL', details: err.message });
+  }
+};
+
+export const getSolForTokens = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { tokenMint, tokenAmount } = req.body;
+    if (!tokenMint || !tokenAmount) {
+      res.status(400).json({ error: 'Token mint and token amount are required' });
+      return;
+    }
+
+    const program = getProgram();
+    const [liquidityPoolPda] = await getLiquidityPoolPda(new PublicKey(tokenMint));
+    const [solVaultPda] = await getSolVaultPda(new PublicKey(tokenMint));
+    const tokenVault = await getAssociatedTokenAddress(liquidityPoolPda, new PublicKey(tokenMint));
+
+    const solAmount = await program.methods
+      .getSolForTokens(new anchor.BN(tokenAmount * 1_000_000_000))
+      .accounts({
+        liquidityPool: liquidityPoolPda,
+        tokenMint: new PublicKey(tokenMint),
+        tokenVault,
+        solVault: solVaultPda,
+      })
+      .call();
+
+    console.log('getSolForTokens SOL amount:', solAmount.toString());
+    res.status(200).json({ message: 'SOL amount retrieved', solAmount: solAmount.toString() });
+  } catch (err: any) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to get SOL for tokens', details: err.message });
+  }
+};
+
+export const distributeTokens = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { tokenMint, recipients, amounts } = req.body;
+    if (!tokenMint || !recipients || !amounts || recipients.length !== amounts.length) {
+      res.status(400).json({ error: 'Token mint, recipients, and amounts are required and must match in length' });
+      return;
+    }
+
+    const program = getProgram();
+    const [supporterContractPda] = await getSupporterContractPda(new PublicKey(tokenMint));
+    const supporterTokenAccount = await getAssociatedTokenAddress(supporterContractPda, new PublicKey(tokenMint));
+
+    for (let i = 0; i < recipients.length; i++) {
+      const recipient = new PublicKey(recipients[i]);
+      const recipientTokenAccount = await getAssociatedTokenAddress(recipient, new PublicKey(tokenMint));
+
+      const tx = await program.methods
+        .distributeTokens(
+          recipients.map((r: string) => new PublicKey(r)),
+          amounts.map((a: number) => new anchor.BN(a * 1_000_000_000))
+        )
+        .accounts({
+          supporterContract: supporterContractPda,
+          supporterTokenAccount,
+          tokenMint: new PublicKey(tokenMint),
+          recipient,
+          recipientTokenAccount,
+          signer: userA.publicKey,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+        })
+        .rpc();
+
+      console.log('DistributeTokens Transaction signature:', tx);
+    }
+
+    res.status(200).json({ message: 'Tokens distributed successfully' });
+  } catch (err: any) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to distribute tokens', details: err.message });
+  }
+};
+
+export const distributeWithSignature = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { tokenMint, dataHash, signature, recipients, amounts } = req.body;
+    if (!tokenMint || !dataHash || !signature || !recipients || !amounts || recipients.length !== amounts.length) {
+      res.status(400).json({ error: 'All fields are required and recipients/amounts must match in length' });
+      return;
+    }
+
+    const program = getProgram();
+    const [supporterContractPda] = await getSupporterContractPda(new PublicKey(tokenMint));
+    const supporterTokenAccount = await getAssociatedTokenAddress(supporterContractPda, new PublicKey(tokenMint));
+    const [signaturePda] = await getSignaturePda(Buffer.from(dataHash, 'hex'));
+
+    for (let i = 0; i < recipients.length; i++) {
+      const recipient = new PublicKey(recipients[i]);
+      const recipientTokenAccount = await getAssociatedTokenAddress(recipient, new PublicKey(tokenMint));
+
+      const tx = await program.methods
+        .distributeWithSignature(
+          Array.from(Buffer.from(dataHash, 'hex')),
+          Array.from(Buffer.from(signature, 'hex')),
+          recipients.map((r: string) => new PublicKey(r)),
+          amounts.map((a: number) => new anchor.BN(a * 1_000_000_000))
+        )
+        .accounts({
+          supporterContract: supporterContractPda,
+          supporterTokenAccount,
+          tokenMint: new PublicKey(tokenMint),
+          recipient,
+          recipientTokenAccount,
+          signatureAccount: signaturePda,
+          payer: userA.publicKey,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+        })
+        .rpc();
+
+      console.log('DistributeWithSignature Transaction signature:', tx);
+    }
+
+    res.status(200).json({ message: 'Tokens distributed with signature successfully' });
+  } catch (err: any) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to distribute tokens with signature', details: err.message });
+  }
+};
+
+export const withdraw = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { tokenMint } = req.body;
+    if (!tokenMint) {
+      res.status(400).json({ error: 'Token mint is required' });
+      return;
+    }
+
+    const program = getProgram();
+    const [selfTokenVaultPda] = await getSelfTokenVaultPda(new PublicKey(tokenMint));
+    const vaultTokenAccount = await getAssociatedTokenAddress(selfTokenVaultPda, new PublicKey(tokenMint));
+    const creatorTokenAccount = await getAssociatedTokenAddress(userA.publicKey, new PublicKey(tokenMint));
+
+    const tx = await program.methods
+      .withdraw()
+      .accounts({
+        selfTokenVault: selfTokenVaultPda,
+        vaultTokenAccount,
+        creatorTokenAccount,
+        tokenMint: new PublicKey(tokenMint),
+        creator: userA.publicKey,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    console.log('Withdraw Transaction signature:', tx);
+    res.status(200).json({ message: 'Tokens withdrawn successfully', transactionSignature: tx });
+  } catch (err: any) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to withdraw tokens', details: err.message });
+  }
+};

@@ -1,0 +1,1 @@
+- `anchor build -- -- -Znext-lockfile-bump`

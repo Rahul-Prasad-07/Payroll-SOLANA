@@ -1,0 +1,84 @@
+import * as anchor from '@coral-xyz/anchor';
+import { Program } from '@coral-xyz/anchor';
+import { ASSOCIATED_TOKEN_PROGRAM_ID, TOKEN_PROGRAM_ID } from '@solana/spl-token';
+import { Keypair, PublicKey, SystemProgram } from '@solana/web3.js';
+import dotenv from 'dotenv';
+
+import { Attenomics } from './types/attenomics';
+
+dotenv.config();
+
+import IDL from './attenomics.json';
+
+export const userA = Keypair.fromSecretKey(new Uint8Array(require("../../privateKey.json")));
+export const userB = Keypair.fromSecretKey(new Uint8Array(require("../../PrivateKey1.json")));
+
+export const PROGRAM_ID = new PublicKey('EKs1cSyPnwEXSe9BKopcSeJoQkcdwWV4fcaWVTP23DJy');
+export const GASLITE_DROP_ADDRESS = userB.publicKey;
+export const PROTOCOL_FEE_ADDRESS = userB.publicKey;
+export const AI_AGENT_ADDRESS = userB.publicKey;
+
+export const getConnection = (): anchor.web3.Connection => {
+  const rpcUrl = 'https://pit44.nodes.rpcpool.com';
+  return new anchor.web3.Connection(rpcUrl, 'confirmed');
+};
+
+export const getWallet = (): anchor.Wallet => {
+  return new anchor.Wallet(userA);
+};
+
+export const getProvider = (): anchor.AnchorProvider => {
+  const connection = getConnection();
+  const wallet = getWallet();
+  return new anchor.AnchorProvider(connection, wallet, anchor.AnchorProvider.defaultOptions());
+};
+
+export const getProgram = (): Program<Attenomics> => {
+  const provider = getProvider();
+  return new anchor.Program<Attenomics>(IDL as Attenomics, provider);
+};
+
+export const getEntryPointPda = async (): Promise<[PublicKey, number]> => {
+  return await PublicKey.findProgramAddressSync([Buffer.from('entry-point')], PROGRAM_ID);
+};
+
+export const getCreatorTokenPda = async (handle: Uint8Array): Promise<[PublicKey, number]> => {
+  return await PublicKey.findProgramAddressSync([Buffer.from('creator-token'), handle], PROGRAM_ID);
+};
+
+export const getSelfTokenVaultPda = async (tokenMint: PublicKey): Promise<[PublicKey, number]> => {
+  return await PublicKey.findProgramAddressSync([Buffer.from('self-token-vault'), tokenMint.toBuffer()], PROGRAM_ID);
+};
+
+export const getLiquidityPoolPda = async (tokenMint: PublicKey): Promise<[PublicKey, number]> => {
+  return await PublicKey.findProgramAddressSync([Buffer.from('liquidity-pool'), tokenMint.toBuffer()], PROGRAM_ID);
+};
+
+export const getSolVaultPda = async (tokenMint: PublicKey): Promise<[PublicKey, number]> => {
+  return await PublicKey.findProgramAddressSync([Buffer.from('sol-vault'), tokenMint.toBuffer()], PROGRAM_ID);
+};
+
+export const getSupporterContractPda = async (tokenMint: PublicKey): Promise<[PublicKey, number]> => {
+  return await PublicKey.findProgramAddressSync([Buffer.from('supporter-contract'), tokenMint.toBuffer()], PROGRAM_ID);
+};
+
+export const getSwapRouterPda = async (): Promise<[PublicKey, number]> => {
+  return await PublicKey.findProgramAddressSync([Buffer.from('swap-router')], PROGRAM_ID);
+};
+
+export const getAiAgentPda = async (agent: PublicKey): Promise<[PublicKey, number]> => {
+  return await PublicKey.findProgramAddressSync([Buffer.from('ai-agent'), agent.toBuffer()], PROGRAM_ID);
+};
+
+export const getSignaturePda = async (dataHash: Uint8Array): Promise<[PublicKey, number]> => {
+  return await PublicKey.findProgramAddressSync([Buffer.from('signature'), dataHash], PROGRAM_ID);
+};
+
+export const getAssociatedTokenAddress = async (owner: PublicKey, tokenMint: PublicKey): Promise<PublicKey> => {
+  return await PublicKey.findProgramAddressSync(
+    [owner.toBuffer(), TOKEN_PROGRAM_ID.toBuffer(), tokenMint.toBuffer()],
+    ASSOCIATED_TOKEN_PROGRAM_ID
+  )[0];
+};
+
+export { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID, SystemProgram };

@@ -1,0 +1,33 @@
+# Node modules
+/node_modules/
+
+# Build directories
+/dist/
+build/
+
+# Log files
+*.log
+
+# Environment variables
+.env
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Rust artifacts (if applicable for Solana programs)
+target/
+
+# Anchor (Solana framework) build output
+/target/deploy/
+Anchor.toml
+
+# Additional artifacts
+*.swp
+*.bak
+
+privateKey.json
+privateKey1.json
+
+chaidex.json
+swap.json
