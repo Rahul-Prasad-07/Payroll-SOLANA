@@ -1,0 +1,838 @@
+{
+  "address": "3CkB1YhoBxHG9uZXJ3fDkjshjb9nXdFQkLSKKNYz9vX7",
+  "metadata": {
+    "name": "payroll_standard",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Created with Anchor"
+  },
+  "instructions": [
+    {
+      "name": "add_employee",
+      "discriminator": [
+        14,
+        82,
+        239,
+        156,
+        50,
+        90,
+        189,
+        61
+      ],
+      "accounts": [
+        {
+          "name": "payroll",
+          "writable": true
+        },
+        {
+          "name": "employee",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  109,
+                  112,
+                  108,
+                  111,
+                  121,
+                  101,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "payroll"
+              },
+              {
+                "kind": "arg",
+                "path": "employee_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "employee_wallet"
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "payroll"
+          ]
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "rent",
+          "address": "SysvarRent111111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "employee_id",
+          "type": "string"
+        },
+        {
+          "name": "salary_amount",
+          "type": "u64"
+        },
+        {
+          "name": "payment_frequency",
+          "type": {
+            "defined": {
+              "name": "PaymentFrequency"
+            }
+          }
+        },
+        {
+          "name": "deductions",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "deposit_funds",
+      "discriminator": [
+        202,
+        39,
+        52,
+        211,
+        53,
+        20,
+        250,
+        88
+      ],
+      "accounts": [
+        {
+          "name": "payroll",
+          "writable": true
+        },
+        {
+          "name": "payroll_vault",
+          "writable": true
+        },
+        {
+          "name": "authority_token_account",
+          "writable": true
+        },
+        {
+          "name": "payment_token",
+          "relations": [
+            "payroll"
+          ]
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "payroll"
+          ]
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "initialize_payroll",
+      "discriminator": [
+        167,
+        26,
+        70,
+        176,
+        167,
+        66,
+        216,
+        138
+      ],
+      "accounts": [
+        {
+          "name": "payroll",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  121,
+                  114,
+                  111,
+                  108,
+                  108
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "payroll_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "payroll_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "payroll"
+              }
+            ]
+          }
+        },
+        {
+          "name": "payment_token"
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "rent",
+          "address": "SysvarRent111111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "payroll_id",
+          "type": "string"
+        },
+        {
+          "name": "payment_token",
+          "type": "pubkey"
+        },
+        {
+          "name": "tax_rate",
+          "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "pause_payroll",
+      "discriminator": [
+        77,
+        167,
+        122,
+        250,
+        144,
+        199,
+        60,
+        243
+      ],
+      "accounts": [
+        {
+          "name": "payroll",
+          "writable": true
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "payroll"
+          ]
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "process_payment",
+      "discriminator": [
+        189,
+        81,
+        30,
+        198,
+        139,
+        186,
+        115,
+        23
+      ],
+      "accounts": [
+        {
+          "name": "payroll",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  121,
+                  114,
+                  111,
+                  108,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "payroll.payroll_id",
+                "account": "Payroll"
+              }
+            ]
+          }
+        },
+        {
+          "name": "employee",
+          "writable": true
+        },
+        {
+          "name": "payroll_vault",
+          "writable": true
+        },
+        {
+          "name": "employee_wallet",
+          "writable": true
+        },
+        {
+          "name": "payment_token",
+          "relations": [
+            "payroll"
+          ]
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "payroll"
+          ]
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "employee_id",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "resume_payroll",
+      "discriminator": [
+        66,
+        189,
+        169,
+        90,
+        216,
+        243,
+        136,
+        57
+      ],
+      "accounts": [
+        {
+          "name": "payroll",
+          "writable": true
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "payroll"
+          ]
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "update_employee",
+      "discriminator": [
+        73,
+        4,
+        138,
+        145,
+        85,
+        224,
+        29,
+        186
+      ],
+      "accounts": [
+        {
+          "name": "payroll"
+        },
+        {
+          "name": "employee",
+          "writable": true
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "payroll"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "salary_amount",
+          "type": "u64"
+        },
+        {
+          "name": "payment_frequency",
+          "type": {
+            "defined": {
+              "name": "PaymentFrequency"
+            }
+          }
+        },
+        {
+          "name": "deductions",
+          "type": "u64"
+        },
+        {
+          "name": "is_active",
+          "type": "bool"
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "Employee",
+      "discriminator": [
+        98,
+        238,
+        61,
+        252,
+        130,
+        77,
+        105,
+        67
+      ]
+    },
+    {
+      "name": "Payroll",
+      "discriminator": [
+        194,
+        86,
+        146,
+        159,
+        169,
+        29,
+        234,
+        51
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "EmployeeAdded",
+      "discriminator": [
+        33,
+        182,
+        133,
+        249,
+        156,
+        132,
+        180,
+        176
+      ]
+    },
+    {
+      "name": "EmployeeUpdated",
+      "discriminator": [
+        15,
+        12,
+        101,
+        103,
+        9,
+        167,
+        130,
+        169
+      ]
+    },
+    {
+      "name": "FundsDeposited",
+      "discriminator": [
+        157,
+        209,
+        100,
+        95,
+        59,
+        100,
+        3,
+        68
+      ]
+    },
+    {
+      "name": "PaymentProcessed",
+      "discriminator": [
+        22,
+        109,
+        191,
+        213,
+        83,
+        63,
+        120,
+        219
+      ]
+    },
+    {
+      "name": "PayrollPaused",
+      "discriminator": [
+        34,
+        233,
+        200,
+        117,
+        26,
+        62,
+        130,
+        220
+      ]
+    },
+    {
+      "name": "PayrollResumed",
+      "discriminator": [
+        202,
+        200,
+        197,
+        44,
+        92,
+        194,
+        192,
+        116
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "PayrollInactive",
+      "msg": "Payroll is not active"
+    },
+    {
+      "code": 6001,
+      "name": "PayrollActive",
+      "msg": "Payroll is already active"
+    },
+    {
+      "code": 6002,
+      "name": "EmployeeInactive",
+      "msg": "Employee is not active"
+    },
+    {
+      "code": 6003,
+      "name": "InvalidPayroll",
+      "msg": "Invalid payroll account"
+    },
+    {
+      "code": 6004,
+      "name": "InvalidEmployeeId",
+      "msg": "Invalid employee ID"
+    },
+    {
+      "code": 6005,
+      "name": "PaymentTooSoon",
+      "msg": "Payment attempted too soon"
+    },
+    {
+      "code": 6006,
+      "name": "InvalidWallet",
+      "msg": "Invalid wallet account"
+    },
+    {
+      "code": 6007,
+      "name": "ArithmeticOverflow",
+      "msg": "Arithmetic overflow occurred"
+    },
+    {
+      "code": 6008,
+      "name": "InvalidPayrollId",
+      "msg": "Invalid payroll ID"
+    },
+    {
+      "code": 6009,
+      "name": "InvalidSalaryAmount",
+      "msg": "Invalid salary amount"
+    },
+    {
+      "code": 6010,
+      "name": "InsufficientFunds",
+      "msg": "Insufficient funds in vault"
+    }
+  ],
+  "types": [
+    {
+      "name": "Employee",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "payroll",
+            "type": "pubkey"
+          },
+          {
+            "name": "employee_id",
+            "type": "string"
+          },
+          {
+            "name": "wallet",
+            "type": "pubkey"
+          },
+          {
+            "name": "salary_amount",
+            "type": "u64"
+          },
+          {
+            "name": "deductions",
+            "type": "u64"
+          },
+          {
+            "name": "payment_frequency",
+            "type": {
+              "defined": {
+                "name": "PaymentFrequency"
+              }
+            }
+          },
+          {
+            "name": "last_payment",
+            "type": "i64"
+          },
+          {
+            "name": "is_active",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "EmployeeAdded",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "payroll_id",
+            "type": "string"
+          },
+          {
+            "name": "employee_id",
+            "type": "string"
+          },
+          {
+            "name": "wallet",
+            "type": "pubkey"
+          },
+          {
+            "name": "salary_amount",
+            "type": "u64"
+          },
+          {
+            "name": "deductions",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "EmployeeUpdated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "payroll_id",
+            "type": "string"
+          },
+          {
+            "name": "employee_id",
+            "type": "string"
+          },
+          {
+            "name": "salary_amount",
+            "type": "u64"
+          },
+          {
+            "name": "deductions",
+            "type": "u64"
+          },
+          {
+            "name": "is_active",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "FundsDeposited",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "payroll_id",
+            "type": "string"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PaymentFrequency",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Weekly"
+          },
+          {
+            "name": "BiWeekly"
+          },
+          {
+            "name": "Monthly"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PaymentProcessed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "payroll_id",
+            "type": "string"
+          },
+          {
+            "name": "employee_id",
+            "type": "string"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "tax_amount",
+            "type": "u64"
+          },
+          {
+            "name": "deductions",
+            "type": "u64"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Payroll",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "payroll_id",
+            "type": "string"
+          },
+          {
+            "name": "payment_token",
+            "type": "pubkey"
+          },
+          {
+            "name": "employee_count",
+            "type": "u64"
+          },
+          {
+            "name": "is_active",
+            "type": "bool"
+          },
+          {
+            "name": "tax_rate",
+            "type": "u16"
+          },
+          {
+            "name": "total_funds",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PayrollPaused",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "payroll_id",
+            "type": "string"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PayrollResumed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "payroll_id",
+            "type": "string"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    }
+  ]
+}

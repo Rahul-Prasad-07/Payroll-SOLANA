@@ -5,14 +5,14 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-solana = "BwzroF85PpoMMjmvYBgvdtXRggJUNUs6sfw6LydFjTEj"
+solana = "3CkB1YhoBxHG9uZXJ3fDkjshjb9nXdFQkLSKKNYz9vX7"
 
 [registry]
 url = "https://api.apr.dev"
 
 [provider]
 cluster = "devnet"
-wallet = "./swap.json"
+wallet = "./deployer.json"
 
 [scripts]
 test = "npx ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
